@@ -17,22 +17,9 @@ func MatMulTransB(a, b, c *Tensor) {
 	aF := a.AsFloat32()
 
 	// 输出 j 列由 B 的第 j 行反量化后与 A 每行点乘得到。
-	// 对量化 B：按输出列流式反量化（一次一行，内存友好）。
+	// 对量化 B：走融合反量化点积（M7.2）——直接在量化块上累加整数，每块只乘一次 scale。
 	if b.Type.IsQuantized() {
-		rowBuf := make([]float32, K)
-		for j := 0; j < int(N); j++ {
-			if err := b.DequantRow(uint32(j), rowBuf); err != nil {
-				panic(err)
-			}
-			for i := 0; i < int(M); i++ {
-				base := i * int(K)
-				acc := float32(0)
-				for k := 0; k < int(K); k++ {
-					acc += aF[base+k] * rowBuf[k]
-				}
-				c.Floats[i*int(N)+j] = acc
-			}
-		}
+		matmulQuantTransB(a, b, c)
 		return
 	}
 

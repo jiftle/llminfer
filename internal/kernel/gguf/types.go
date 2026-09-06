@@ -77,16 +77,16 @@ type blockInfo struct {
 var blockTable = map[GGMLType]blockInfo{
 	TypeF32:  {1, 4},
 	TypeF16:  {1, 2},
-	TypeQ4_0: {32, 2 + 16}, // 1×f16 scale + 16×8bit 量化值
-	TypeQ4_1: {32, 2 + 2 + 16},
-	TypeQ5_0: {32, 2 + 4 + 16},
-	TypeQ5_1: {32, 2 + 2 + 16 + 4},
-	TypeQ8_0: {32, 2 + 32}, // 1×f16 scale + 每元素 1 字节
-	TypeQ2_K: {256, 2 + 16 + 64},
-	TypeQ3_K: {256, 2 + 12 + 32 + 64},
-	TypeQ4_K: {256, 2 + 12 + 96 + 16},
-	TypeQ5_K: {256, 2 + 12 + 96 + 32 + 32},
-	TypeQ6_K: {256, 2 + 16 + 192 + 16},
+	TypeQ4_0: {32, 18}, // 1×f16 scale + 16×4bit 量化值
+	TypeQ4_1: {32, 20}, // d(2) + m(2) + qs(16)
+	TypeQ5_0: {32, 22}, // d(2) + qh(4) + qs(16)
+	TypeQ5_1: {32, 24}, // d(2) + m(2) + qh(4) + qs(16)
+	TypeQ8_0: {32, 34}, // 1×f16 scale + 每元素 1 字节
+	TypeQ2_K: {256, 84},    // d2 + dmin2 + qs2 16 + qs 64
+	TypeQ3_K: {256, 110},   // d2 + qs(32) + qh(64) + scales 12
+	TypeQ4_K: {256, 144},   // d2 + dmin2 + scales 12 + qs 128
+	TypeQ5_K: {256, 176},   // d2 + dmin2 + scales 12 + qh 32 + qs 128
+	TypeQ6_K: {256, 210},   // ql 128 + qh 64 + scales 16 + d2
 }
 
 // IsQuantized 判断是否为量化类型（非 F32/F16 即量化）。
