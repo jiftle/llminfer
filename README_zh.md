@@ -81,7 +81,7 @@ main.go
 | M7 前基线（单线程） | 1.2 tok/s | 2.7 tok/s |
 | M7 后（8 线程） | 6.4 tok/s | 13.3 tok/s |
 
-多轮对话启用 KV 前缀复用：系统提示+历史不重算，只前向新增 token。详见 `1-docs/M7-性能优化方案.md`。
+多轮对话启用 KV 前缀复用：系统提示+历史不重算，只前向新增 token。详见 `1-docs/M7-Performance_zh.md`。
 
 ## 开发
 
@@ -91,13 +91,15 @@ make bench    # 性能基准
 ```
 
 - **验证方式**：`go test ./...`（tensor/chat/sampler/cache 单测）+ `go run . run <模型> "<prompt>"` 看生成是否合理，各里程碑验收细节见 `1-docs/M{n}-*.md`。
-- **目录约定**：`1-docs/M{n}-*.md` 每里程碑一篇设计文档（含公式、验收记录、踩坑、术语表）。
+- **目录约定**：`1-docs/M{n}-*.md`（英文主文件）与 `M{n}-*_zh.md`（中文版）每里程碑一篇（含公式、验收记录、踩坑、术语表）。
 - **提交约定**：中文提交信息，一个里程碑一个提交。
 
 ## 文档
 
-- [1-docs/架构设计说明.md](1-docs/架构设计说明.md) —— 总体架构、里程碑进度、踩坑经验
-- [1-docs/M1-GGUF文件解析.md](1-docs/M1-GGUF文件解析.md) ~ [M7-性能优化方案.md](1-docs/M7-性能优化方案.md) —— 各里程碑详细笔记
+每份文档双语并存：`*.md` 为英文主文件、`*_zh.md` 为中文版。
+
+- [1-docs/Architecture_zh.md](1-docs/Architecture_zh.md) —— 总体架构、里程碑进度、踩坑经验
+- [1-docs/M1-GGUF-Parsing_zh.md](1-docs/M1-GGUF-Parsing_zh.md) ~ [M7-Performance_zh.md](1-docs/M7-Performance_zh.md) —— 各里程碑详细笔记
 
 ## 里程碑
 

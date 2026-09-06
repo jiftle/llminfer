@@ -44,14 +44,15 @@ llminfer/
 │       ├── chat.go         # template detection + rendering + default system extraction
 │       └── chat_test.go    # 6 unit tests all green
 ├── models/                 # local GGUF model files (.gitignore)
-└── 1-docs/                 # design docs
-    ├── 架构设计说明.md       # this file (Chinese original)
-    ├── M1-GGUF文件解析.md
-    ├── M2-分词器.md
-    ├── M3-张量算子.md
-    ├── M4-前向推理.md
-    ├── M5-采样生成.md
-    └── M6-ChatML对话模板.md
+└── 1-docs/                 # design docs (English primary + _zh Chinese)
+    ├── Architecture.md       # this file (English) / Architecture_zh.md
+    ├── M1-GGUF-Parsing.md    # + M1-GGUF-Parsing_zh.md
+    ├── M2-Tokenizer.md       # + M2-Tokenizer_zh.md
+    ├── M3-Tensor-Ops.md      # + M3-Tensor-Ops_zh.md
+    ├── M4-Forward-Pass.md    # + M4-Forward-Pass_zh.md
+    ├── M5-Sampling.md        # + M5-Sampling_zh.md
+    ├── M6-ChatML-Template.md # + M6-ChatML-Template_zh.md
+    └── M7-Performance.md     # + M7-Performance_zh.md
 ```
 
 ## End-to-End Inference Pipeline (What This Project Does in One Pass)
@@ -122,7 +123,7 @@ M1 GGUF parsing ✅ → M2 tokenization ✅ → M3 tensor ops ✅ → M4 forward
 
 ## Next Steps
 
-The M1–M6 main line is complete. Current main line: **M7 performance optimization** (fused dequantization dot product + multithreading + buffer reuse); see [M7-性能优化方案.md](M7-性能优化方案.md) for details.
+The M1–M6 main line is complete. Current main line: **M7 performance optimization** (fused dequantization dot product + multithreading + buffer reuse); see [M7-Performance.md](M7-Performance.md) for details.
 
 Other candidate directions:
 

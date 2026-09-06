@@ -44,14 +44,15 @@ llminfer/
 │       ├── chat.go         # 模板检测 + 渲染 + 默认 system 提取
 │       └── chat_test.go    # 6 个单测全绿
 ├── models/                 # 本地 GGUF 模型文件（.gitignore）
-└── 1-docs/                 # 设计文档
-    ├── 架构设计说明.md       # 本文件
-    ├── M1-GGUF文件解析.md
-    ├── M2-分词器.md
-    ├── M3-张量算子.md
-    ├── M4-前向推理.md
-    ├── M5-采样生成.md
-    └── M6-ChatML对话模板.md
+└── 1-docs/                 # 设计文档（英文主文件 + _zh 中文版）
+    ├── Architecture.md       # 英文 / Architecture_zh.md 本文件
+    ├── M1-GGUF-Parsing.md    # 英文 / M1-GGUF-Parsing_zh.md 中文
+    ├── M2-Tokenizer.md       # 英文 / M2-Tokenizer_zh.md 中文
+    ├── M3-Tensor-Ops.md      # 英文 / M3-Tensor-Ops_zh.md 中文
+    ├── M4-Forward-Pass.md    # 英文 / M4-Forward-Pass_zh.md 中文
+    ├── M5-Sampling.md        # 英文 / M5-Sampling_zh.md 中文
+    ├── M6-ChatML-Template.md # 英文 / M6-ChatML-Template_zh.md 中文
+    └── M7-Performance.md     # 英文 / M7-Performance_zh.md 中文
 ```
 
 ## 推理全链路（一遍看懂整个项目在搓什么）
@@ -122,7 +123,7 @@ M1 GGUF解析 ✅ → M2 分词 ✅ → M3 张量算子 ✅ → M4 前向+KV缓�
 
 ## 下一步
 
-M1-M6 主线完成。当前主线：**M7 性能优化**（融合反量化点积 + 多线程 + 缓冲复用），详见 [M7-性能优化方案.md](M7-性能优化方案.md)。
+M1-M6 主线完成。当前主线：**M7 性能优化**（融合反量化点积 + 多线程 + 缓冲复用），详见 [M7-Performance_zh.md](M7-Performance_zh.md)。
 
 其他候选方向：
 

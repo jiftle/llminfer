@@ -81,7 +81,7 @@ main.go
 | Baseline before M7 (single thread) | 1.2 tok/s | 2.7 tok/s |
 | After M7 (8 threads) | 6.4 tok/s | 13.3 tok/s |
 
-Multi-turn chat uses KV prefix reuse: system prompt + history are not recomputed, only new tokens are forwarded. Details in `1-docs/M7-性能优化方案.md` (Chinese).
+Multi-turn chat uses KV prefix reuse: system prompt + history are not recomputed, only new tokens are forwarded. Details in `1-docs/M7-Performance.md`.
 
 ## Development
 
@@ -91,13 +91,15 @@ make bench    # performance benchmark
 ```
 
 - **Verification**: `go test ./...` (tensor/chat/sampler/cache unit tests) + `go run . run <model> "<prompt>"` to check output sanity. Milestone acceptance details live in `1-docs/M{n}-*.md`.
-- **Doc convention**: one design doc per milestone in `1-docs/M{n}-*.md` (formulas, acceptance records, pitfalls, glossary).
+- **Doc convention**: one design doc per milestone in `1-docs/M{n}-*.md` (English) / `M{n}-*_zh.md` (Chinese); formulas, acceptance records, pitfalls, glossary.
 - **Commit convention**: Chinese commit messages, one commit per milestone.
 
-## Docs (Chinese)
+## Docs
 
-- [1-docs/架构设计说明.md](1-docs/架构设计说明.md) — architecture overview, milestone progress, pitfalls
-- [1-docs/M1-GGUF文件解析.md](1-docs/M1-GGUF文件解析.md) ~ [M7-性能优化方案.md](1-docs/M7-性能优化方案.md) — detailed milestone notes
+Every doc ships in two languages: `*.md` (English primary) and `*_zh.md` (Chinese).
+
+- [1-docs/Architecture.md](1-docs/Architecture.md) — architecture overview, milestone progress, pitfalls
+- [1-docs/M1-GGUF-Parsing.md](1-docs/M1-GGUF-Parsing.md) ~ [M7-Performance.md](1-docs/M7-Performance.md) — detailed milestone notes
 
 ## Milestones
 

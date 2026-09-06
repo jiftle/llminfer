@@ -1,76 +1,87 @@
-# llminfer 仓库指南
+# llminfer — Repository Guide
 
-## 仓库性质
+## What this repo is
 
-纯 Go LLM 推理引擎（学习项目）：加载 GGUF 模型 → 逐字生成文本。不是生产代码库——无 CI、无 lint、无 Makefile。验证靠 `go test` 单测 + 运行脚本核对输出。
+A **pure-Go LLM inference engine** built from scratch as a learning project: load a real GGUF model (qwen2.5-0.5b) → generate text token by token → multi-turn chat. Not a production codebase — no CI, no lint config, no external deps. Verification relies on `go test` unit tests plus running the scripts and eyeballing the output.
 
-## 常用命令
+## Common commands
 
 ```bash
-# 跑生成（flags 必须在 MODEL 前面！）
+# Generate once (flags MUST precede MODEL!)
 go run . run -max-tokens 30 -temperature 0 models/qwen2.5-0.5b.gguf "The capital of France is"
 go run . run -temperature 0.8 -max-tokens 64 models/qwen2.5-0.5b.gguf "Hello"
 
-# 交互式多轮聊天（ChatML 模板）
+# Interactive multi-turn chat (ChatML template)
 go run . run -chat -max-tokens 80 models/qwen2.5-0.5b.gguf
 
-# 跑全部测试
+# Performance benchmark (threads default = 2/3 of CPU cores, e.g. 8 on 12)
+go run . bench models/qwen2.5-0.5b.gguf
+
+# All tests
 go test ./...
 
-# 编译检查
+# Compile check
 go build ./... && go vet ./...
 ```
 
-**flag 顺序坑**：Go `flag.NewFlagSet` 遇到非 flag 字符就停止解析。`llminfer run MODEL -temp 0.8` 不生效，必须 `llminfer run -temp 0.8 MODEL`。
+**Flag-order gotcha**: Go `flag.NewFlagSet` stops parsing at the first non-flag arg. `llminfer run MODEL -temp 0.8` does NOT work; use `llminfer run -temp 0.8 MODEL`.
 
-## 依赖与环境
+## Dependencies & environment
 
-- Go 1.26（`go.mod` 声明）
-- 无外部依赖（纯标准库 + 自研包）
-- 模型文件：`models/qwen2.5-0.5b.gguf`（397MB，未入库，需自行放置）
+- Go 1.26 (declared in `go.mod`)
+- Zero external dependencies (stdlib only + in-house packages)
+- Model file: `models/qwen2.5-0.5b.gguf` (~397MB, not committed — see README for how to obtain)
+- Git remotes: `origin` = gitee, `github` = GitHub. Default branch is `main`.
 
-## 目录结构与包职责
+## Directory structure & package responsibilities
 
 ```
-cmd/              # CLI 入口（command.go 分发，generate.go 生成循环）
+cmd/              # CLI entry (command.go dispatch, generate.go generation loop)
 internal/kernel/
-  gguf/           # GGUF 文件解析（元数据 + 张量信息表）
-  tokenizer/      # tiktoken BPE 分词（Encode/Decode/EOS）
-  tensor/         # 张量 + MatMul + 反量化 + RMSNorm/RoPE/SoftMax
-  model/          # LLaMAModel：从 GGUF 加载权重，按名挂载张量
-  cache/          # KV Cache：[layer][pos][kvHead][headDim] 布局
-  eval/           # 前向推理：embed → 24层Transformer → logits
-  sampler/        # 采样：温度/top-k/top-p/贪心
-  chat/           # ChatML 对话模板：检测 + 渲染 + 默认system提取
-1-docs/           # 设计文档（每里程碑一篇，含术语表）
+  gguf/           # GGUF file parsing (metadata + tensor info table)
+  tokenizer/      # tiktoken byte-level BPE (Encode/Decode/EOS)
+  tensor/         # Tensor + MatMul + fused dequant-dot + RMSNorm/RoPE/SoftMax
+  model/          # LLaMAModel: mount GGUF weights by name
+  cache/          # KV Cache [layer][pos][kvHead][headDim] + Truncate (prefix reuse)
+  eval/           # Forward inference: prefill / decode / KV prefix reuse (ForwardWithCache)
+  sampler/        # Sampling: temperature/top-k/top-p/greedy
+  chat/           # ChatML chat template: detect + render + default-system extraction
+  threads.go      # default thread count = NumCPU*2/3 (see tensor/)
+1-docs/           # design docs, bilingual: *.md (English) + *_zh.md (Chinese)
 ```
 
-## 验证方式
+## Verification approach
 
-- 验证靠 `go test ./...` + `go run . run <模型> "<prompt>"` 看输出是否合理
-- 单算子验证：`go test ./internal/kernel/tensor/`（反量化/MatMul/RMSNorm 手算核对）
-- 前向验证：`go test ./internal/kernel/tokenizer/` 等包的单测
-- 各里程碑的验收细节记录在 `1-docs/M{n}-*.md`
+- `go test ./...` — unit tests in tensor/chat/sampler/cache (hand-computed references).
+- End-to-end sanity: `go run . run <model> "<prompt>"` and check the output reads coherently.
+- Per-milestone acceptance + pitfalls are recorded in `1-docs/`.
+- When changing fused quantized dot products, run `go test ./internal/kernel/tensor/` and re-benchmark before/after with `go run . bench` (report tokens/s deltas).
 
-## 约定
+## Conventions
 
-- 中文提交信息，里程碑式提交（一个里程碑一个提交）
-- 代码直白优先：先求对，不求快，每行注释"为什么"
-- 每个里程碑写 1-docs 文档（含术语表）
-- VS Code 调试配置（`.vscode/`）手动 add，不自动忽略
-- GGUF 模型文件 `.gitignore` 排除（体积大）
+- **Commit messages in English** (repo is public / GitHub-oriented). One commit per milestone.
+- Code is deliberately straightforward over fast: correctness first, and every line explains *why*. Optimizations that hurt readability must be documented (see M7).
+- Docs live in `1-docs/`, one file pair per milestone (English `M{n}-Topic.md` + Chinese `M{n}-Topic_zh.md`), each ending with a glossary.
+- `.vscode/` debug configs are added manually (not auto-ignored, not auto-committed).
+- GGUF model files are gitignored (too large).
 
-## 里程碑进度
+## Milestone status
 
 ```
-M1 GGUF解析 ✅ → M2 分词 ✅ → M3 张量算子 ✅ → M4 前向+KV缓存 ✅ → M5 生成+采样 ✅ → M6 ChatML模板 ✅
+M1 GGUF parsing ✅ → M2 tokenizer ✅ → M3 tensor ops ✅ → M4 forward + KV cache ✅
+→ M5 generation + sampling ✅ → M6 ChatML chat ✅ → M7 performance ✅
 ```
 
-## 关键踩坑经验
+Key perf results (12-core, qwen2.5-0.5b): decode 1.2→6.4 tok/s, prefill 2.7→13.3 tok/s; multi-turn reuses KV prefix. Details in `1-docs/M7-Performance.md`.
 
-- **GGUF 张量 offset**：相对数据区起点，不是文件头。读取必须 `DataStart + Offset`。
-- **一维权重行数**：norm/bias 是一维张量（NE=[896,0,0,0]），`AsFloat32` 用 NE[1] 当行数→0→全0。加 `Rows()` 方法修复。
-- **flag 参数顺序**：Go flag 必须在位置参数前面。
-- **tokenizer 需要 GGUFFile**：model.Load 读完就 Close，tokenizer 需再读一次元数据（轻量）。
-- **M6 模板正则 `\n`**：qwen 模板里的 `\n` 是字面反斜杠+n 两个字符（非换行符），Go 正则要 `\\n` 匹配，测试常量用反引号字符串。
-- **M6 默认 system 提取**：模板里默认系统提示是「system标记+文案+结束标记」整段单引号字符串，剥标记后要再剥掉字面 `\n`。
+## Hard-won pitfalls (avoid re-tripping)
+
+- **GGUF tensor offset is relative to the data section**, not the file header. Always read at `DataStart + Offset`.
+- **1-D weight rows**: norm/bias tensors are 1-D (NE=[896,0,0,0]); using `NE[1]` as the row count → 0 → all-zero weights. Use `Rows()` (1-D = 1 row).
+- **Flag order**: Go flags must precede positional args.
+- **Tokenizer needs its own GGUFFile pass**: `model.Load` closes the file after mounting; re-read metadata for the tokenizer (cheap).
+- **M6 template regex `\n`**: in qwen templates `\n` is a literal backslash+n (two chars), not a newline. Match it in regex as `\\n`; write test constants with backquoted strings.
+- **M6 default-system extraction**: the default system prompt is one single-quoted segment `'<|im_start|>system\n…<|im_end|>\n'`; strip the markers and then the literal `\n`, or you get a stray newline.
+- **M7 gguf block table must match tensor sizes**: Q4_K block = 144 bytes (not 126), Q6_K = 210 (not 226). A mismatch silently truncates `Data` and panics later in dequant.
+- **M7 prefill loop order**: outer loop over rows (i), inner over columns (j) so activation rows stay cache-resident; the reverse order drops prefill from 2.7 to 1.5 tok/s.
+- **M7 thread default**: don't hardcode 8 — derive `NumCPU()*2/3` so it scales to other machines.
