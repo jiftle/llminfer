@@ -62,7 +62,7 @@ func bench(args []string) error {
 	fmt.Printf("加载耗时: %d ms\n", loadDur.Milliseconds())
 	effThreads := *threads
 	if effThreads <= 0 {
-		effThreads = tensor.DefaultThreads
+		effThreads = tensor.DefaultThreads()
 	}
 	fmt.Printf("线程: %d（本机 %d 核）\n", effThreads, runtime.NumCPU())
 

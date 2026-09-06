@@ -19,7 +19,7 @@ type GenerateOptions struct {
 	TopK        int
 	TopP        float64
 	Seed        int64
-	Threads     int     // 并行 worker 数（≤0 用默认 8）
+	Threads     int     // 并行 worker 数（≤0 按核数 2/3 自动）
 	Verbose     bool    // 打印模型信息与每步调试
 }
 
