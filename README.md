@@ -1,74 +1,88 @@
 # llminfer
 
-从零实现的**纯 Go LLM 推理引擎**（学习项目，无任何外部依赖）。能加载真实 GGUF 模型（qwen2.5-0.5b）并逐字生成文本、进行多轮聊天。
+A **pure-Go LLM inference engine** built from scratch (learning project, zero external dependencies). It loads a real GGUF model (qwen2.5-0.5b) and generates text token by token, supporting multi-turn chat.
 
-> 定位：不是生产推理服务，而是"把 LLM 从把计算到输出拆开讲明白"的学习工程。每个里程碑都有内部单测与自验记录。
+> Positioning: not a production inference service, but a learning project that "explains how an LLM goes from computation to output". Every milestone has internal unit tests and a self-verification record.
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 编译 + 单次生成
+# Build + single-shot generation
 go run . run models/qwen2.5-0.5b.gguf "The capital of France is" -temperature 0
 
-# 交互式多轮聊天（ChatML 模板）
+# Interactive multi-turn chat (ChatML template, KV prefix reuse across turns)
 go run . run -chat models/qwen2.5-0.5b.gguf
 
-# 参数说明
+# CLI help
 go run . run --help
+
+# Performance benchmark (defaults to 2/3 of your CPU cores; override with -threads)
+go run . bench models/qwen2.5-0.5b.gguf
 ```
 
-> ⚠️ Go 的 flag 必须在 MODEL 前面：`-temperature 0 MODEL` 合法，`MODEL -temperature 0` 无效。
+> ⚠️ Go flags must come before the MODEL positional arg: `-temperature 0 MODEL` is valid, `MODEL -temperature 0` is not.
 
-### 模型文件
+### Model File
 
-`models/qwen2.5-0.5b.gguf`（397MB，Qwen2.5 0.5B Instruct）未入库，需要自行准备，放入 `models/` 即可。当前代码针对 qwen2 架构 + ChatML 模板适配。
+`models/qwen2.5-0.5b.gguf` (397MB, Qwen2.5 0.5B Instruct) is not committed; provide it yourself and place it under `models/`. The code is currently tuned for the qwen2 architecture + ChatML template.
 
-## 能干什么 / 不能干什么
+## Feature Status
 
-| 能力 | 状态 |
+| Feature | Status |
 |---|---|
-| GGUF 解析 / 字节级 BPE 分词 | ✅ M1/M2 |
-| 量化反量化 Q4_0~Q6_K + MatMul/归一化/RoPE | ✅ M3 |
-| 前向推理（24 层 Transformer + GQA + KV Cache） | ✅ M4 |
-| 采样生成（贪心/温度/top-k/top-p） | ✅ M5 |
-| 多轮聊天（ChatML 对话模板） | ✅ M6 |
-| GPTQ/AWQ 等其他量化、张量并行、GPU 加速 | ❌ 未做 |
+| GGUF parsing / byte-level BPE tokenizer | ✅ M1/M2 |
+| Dequantization Q4_0~Q6_K + MatMul / RMSNorm / RoPE | ✅ M3 |
+| Forward pass (24-layer Transformer + GQA + KV Cache) | ✅ M4 |
+| Sampling (greedy / temperature / top-k / top-p) | ✅ M5 |
+| Multi-turn chat (ChatML template) | ✅ M6 |
+| Perf: fused dequant-dot + multithreading + buffer reuse + KV prefix reuse | ✅ M7 |
+| GPTQ/AWQ & other quantizations, tensor parallelism, GPU | ❌ Not done |
 
-## 架构一览
+## Architecture
 
 ```
 main.go
-├── cmd/                  # CLI run/bench 分发 + 生成逻辑 + 交互聊天
-└── internal/kernel/      # 纯计算内核（单向依赖）
-    ├── gguf/             # GGUF 文件解析（元数据 + 张量信息表）
-    ├── tokenizer/        # tiktoken 字节级 BPE（Encode/Decode/特殊token/对话模板）
-    ├── chat/             # ChatML 模板检测与渲染
-    ├── tensor/           # 张量 + MatMul + 反量化 + RMSNorm/RoPE/SoftMax
-    ├── model/            # 从 GGUF 挂载权重为 LLaMAModel
-    ├── cache/            # KV Cache [layer][pos][kvHead][headDim]
-    ├── eval/             # 前向推理 Context（Reshape → 逐层 → logits）
-    └── sampler/          # 采样器（贪心/温度/top-k/top-p）
+├── cmd/                  # CLI dispatch (run/bench) + generation loop + interactive chat
+└── internal/kernel/      # pure compute kernel (one-way deps)
+    ├── gguf/             # GGUF file parser (metadata + tensor info table)
+    ├── tokenizer/        # tiktoken byte-level BPE (Encode/Decode/special tokens/chat template)
+    ├── chat/             # ChatML template detection & rendering
+    ├── tensor/           # Tensor + MatMul + dequant + RMSNorm/RoPE/SoftMax
+    ├── model/            # mount GGUF weights into LLaMAModel
+    ├── cache/            # KV Cache + prefix truncation (Truncate)
+    ├── eval/             # forward Context (prefill / decode / prefix reuse)
+    └── sampler/          # sampler (greedy/temperature/top-k/top-p)
 ```
 
-## 开发
+## Performance (12-core CPU, qwen2.5-0.5b)
+
+| Stage | decode | prefill |
+|---|---|---|
+| Baseline before M7 (single thread) | 1.2 tok/s | 2.7 tok/s |
+| After M7 (8 threads) | 6.4 tok/s | 13.3 tok/s |
+
+Multi-turn chat uses KV prefix reuse: system prompt + history are not recomputed, only new tokens are forwarded. Details in `1-docs/M7-性能优化方案.md` (Chinese).
+
+## Development
 
 ```bash
 go build ./... && go vet ./... && go test ./...
+make bench    # performance benchmark
 ```
 
-- **验证方式**：`go test ./...`（tensor/chat/sampler 单测）+ `go run . run <模型> "<prompt>"` 看生成是否合理，各里程碑验收细节见 `1-docs/M{n}-*.md`。
-- **目录约定**：`1-docs/M{n}-*.md` 每里程碑一篇设计文档（含公式、验收记录、踩坑、术语表）。
-- **提交约定**：中文提交信息，一个里程碑一个提交。
+- **Verification**: `go test ./...` (tensor/chat/sampler/cache unit tests) + `go run . run <model> "<prompt>"` to check output sanity. Milestone acceptance details live in `1-docs/M{n}-*.md`.
+- **Doc convention**: one design doc per milestone in `1-docs/M{n}-*.md` (formulas, acceptance records, pitfalls, glossary).
+- **Commit convention**: Chinese commit messages, one commit per milestone.
 
-## 文档
+## Docs (Chinese)
 
-- [1-docs/架构设计说明.md](1-docs/架构设计说明.md) —— 总体架构、里程碑进度、踩坑经验
-- [1-docs/M1-GGUF文件解析.md](1-docs/M1-GGUF文件解析.md) ~ [M6-ChatML对话模板.md](1-docs/M6-ChatML对话模板.md) —— 各里程碑详细笔记
+- [1-docs/架构设计说明.md](1-docs/架构设计说明.md) — architecture overview, milestone progress, pitfalls
+- [1-docs/M1-GGUF文件解析.md](1-docs/M1-GGUF文件解析.md) ~ [M7-性能优化方案.md](1-docs/M7-性能优化方案.md) — detailed milestone notes
 
-## 里程碑
+## Milestones
 
 ```
-M1 GGUF解析 → M2 分词 → M3 张量算子 → M4 前向+KV缓存 → M5 生成+采样 → M6 ChatML对话
+M1 GGUF parsing → M2 tokenizer → M3 tensor ops → M4 forward + KV cache → M5 generation + sampling → M6 ChatML chat → M7 performance
 ```
 
-全部完成 ✅。下一个自然方向：路径规划（增量续推优化、自回归速度基准）、更高效的量化算子、更完整的模板引擎。
+All done ✅. Next candidates: more complete quantized ops (SIMD), a fuller template engine.
