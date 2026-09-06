@@ -24,7 +24,27 @@ go run . bench models/qwen2.5-0.5b.gguf
 
 ### 模型文件
 
-`models/qwen2.5-0.5b.gguf`（397MB，Qwen2.5 0.5B Instruct）未入库，需要自行准备，放入 `models/` 即可。当前代码针对 qwen2 架构 + ChatML 模板适配。
+引擎使用 **Qwen2.5 0.5B Instruct**（GGUF 格式，qwen2 架构 + ChatML 对话模板）。代码按该架构适配，直接加载同架构的其他 GGUF（如更大 Qwen2.5）也能跑。
+
+**获取方式（任选其一）：**
+
+```bash
+# 1) 从 Ollama 提取（与开发测试同款）
+ollama pull qwen2.5:0.5b
+# 找到模型 blob（约 397MB，名字含 sha256 前缀），复制为 .gguf：
+#   ~/.ollama/models/blobs/sha256-xxxxxxxx → models/qwen2.5-0.5b.gguf
+# 可用 `ollama show qwen2.5:0.5b --modelfile` 查看其源文件名定位
+
+# 2) 从 Hugging Face 下载 GGUF
+#   https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF
+#   （选 q4_k_m 或 q8_0 档的 .gguf，放到 models/ 下）
+
+# 3) 自己转换（需要原版 safetensors + 转换工具）
+#   从 https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct 下载权重，
+#   按 GGUF 官方转换流程转成 .gguf 放入 models/
+```
+
+`models/qwen2.5-0.5b.gguf` 未入库（体积大），放入 `models/` 即可被加载。
 
 ## 能干什么 / 不能干什么
 

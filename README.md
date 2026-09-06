@@ -24,7 +24,27 @@ go run . bench models/qwen2.5-0.5b.gguf
 
 ### Model File
 
-`models/qwen2.5-0.5b.gguf` (397MB, Qwen2.5 0.5B Instruct) is not committed; provide it yourself and place it under `models/`. The code is currently tuned for the qwen2 architecture + ChatML template.
+The engine runs **Qwen2.5 0.5B Instruct** (GGUF format, qwen2 architecture + ChatML template). The code is tuned to this architecture; other qwen2-architecture GGUF files (e.g., larger Qwen2.5) load as well.
+
+**How to obtain it (pick one):**
+
+```bash
+# 1) Extract from Ollama (the same build used for development/tests)
+ollama pull qwen2.5:0.5b
+# locate the model blob (~397MB, sha256-prefixed name), copy it as .gguf:
+#   ~/.ollama/models/blobs/sha256-xxxxxxxx → models/qwen2.5-0.5b.gguf
+# use `ollama show qwen2.5:0.5b --modelfile` to find its source file name
+
+# 2) Download a GGUF from Hugging Face
+#   https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF
+#   (pick a q4_k_m or q8_0 .gguf and drop it into models/)
+
+# 3) Convert it yourself (requires the original safetensors + a converter)
+#   grab weights from https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct
+#   and follow the official GGUF conversion flow, output into models/
+```
+
+`models/qwen2.5-0.5b.gguf` is not committed (large); just place it under `models/` and it will be loaded.
 
 ## Feature Status
 
