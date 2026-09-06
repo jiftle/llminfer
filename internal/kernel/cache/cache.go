@@ -77,3 +77,15 @@ func (c *KVCache) Clear() {
 	clear(c.buf)
 	c.len = 0
 }
+
+// Truncate 把有效位置数截短到 pos（数据保留不抹零，位置 pos 之后会被后续 Write 覆盖）。
+// 配合 KV 前缀复用：历史公共前缀算过就不再重算，只需从 pos 起写新 token。
+func (c *KVCache) Truncate(pos int) {
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > c.len {
+		return
+	}
+	c.len = pos
+}

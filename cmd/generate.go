@@ -152,10 +152,9 @@ func (s *ChatSession) Chat(userMsg string) (string, int, error) {
 		return "", 0, fmt.Errorf("prompt 分词为空")
 	}
 
-	// 每轮重建 KV cache：把完整渲染 prompt 一次性 prefill 进去（简单正确版）。
-	// 性能优化（增量续推，跳过历史）留到后续里程碑。
-	s.ctx.Reset()
-	logits := s.ctx.Forward(ids)
+	// KV 前缀复用（M7.5）：不重置会话，ForwardWithCache 自动比对 ids 与已处理 seq。
+	// 多轮时系统提示+历史不变，命中前缀 → 只前向新增 token，历史 KV 直接复用。
+	logits := s.ctx.ForwardWithCache(ids)
 
 	// 解码循环：采样 → 命中停止标记则停 → 前向下一个 token
 	stopIDs := s.tok.ChatStopIDs()

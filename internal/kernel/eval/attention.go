@@ -15,6 +15,9 @@ import (
 //
 // GQA：group = HeadsCount / HeadsKV，即一个 KV 头服务 group 个 Q 头。
 // kvH = h / group —— 多个 Q 头共享同一个 KV 头（省 KV 缓存显存）。
+//
+// 缓冲复用（M7.4）：score 行长度随位置增长，复用 ctx.scoresBuf；vout 直接累加
+// 到 attBuf 对应段，免去临时缓冲。
 func (ctx *Context) attention(li int, n, nEmb, kvEmb, pos0 uint32) {
 	m := ctx.m
 	headDim := m.HeadDim()
@@ -24,8 +27,10 @@ func (ctx *Context) attention(li int, n, nEmb, kvEmb, pos0 uint32) {
 	for i := uint32(0); i < n; i++ {
 		tPos := int(pos0 + i) // 该 token 的绝对位置
 		qRow := int(i) * int(nEmb)
-		scores := make([]float32, tPos+1) // 与前面所有 token 的相似度
-		vout := make([]float32, headDim)
+
+		// score 行复用：最长 = tPos+1，随位置增长惰性扩容
+		ctx.scoresBuf = ensure(ctx.scoresBuf, tPos+1)
+		scores := ctx.scoresBuf[:tPos+1]
 
 		for h := 0; h < m.HeadsCount; h++ {
 			kvH := h / group
@@ -42,19 +47,18 @@ func (ctx *Context) attention(li int, n, nEmb, kvEmb, pos0 uint32) {
 			}
 			// 2) softmax（数值稳定版：先减行内 max）
 			tensor.SoftMax(scores, scores, tPos+1)
-			// 3) 加权求和 V
-			for d := range vout {
-				vout[d] = 0
+			// 3) 加权求和 V，直接累加进 attBuf 的 (i, h) 段（免临时 vout）
+			ap := qRow + h*headDim
+			for d := 0; d < headDim; d++ {
+				ctx.attBuf[ap+d] = 0
 			}
 			for p := 0; p <= tPos; p++ {
 				v := ctx.kv.VHead(li, p, kvH, headDim)
 				w := scores[p]
 				for d := 0; d < headDim; d++ {
-					vout[d] += w * v[d]
+					ctx.attBuf[ap+d] += w * v[d]
 				}
 			}
-			// 4) 写回注意力输出位置 (i, h)
-			copy(ctx.attBuf[qRow+h*headDim:], vout)
 		}
 	}
 }

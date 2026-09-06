@@ -27,13 +27,15 @@ type Context struct {
 	threads int // 并行 worker 数（M7.3，0=用默认）
 
 	// 复用缓冲（跨 Forward 调用惰性扩容，decode 每步不重复分配）
-	qBuf, kBuf, vBuf  []float32
-	attBuf, normBuf   []float32
-	layerOut          []float32
-	ffnA, ffnB        []float32
-	outT              *tensor.Tensor // 词表投影输出（复用）
-	lastLogits        []float32      // 最近一次 logits 的拷贝
-	seq               []uint32       // 已处理的 token 序列（长度==pos）
+	xBuf             []float32 // embed 输出 / 残差载体 [n, nEmb]（M7.4 新增）
+	qBuf, kBuf, vBuf []float32
+	attBuf, normBuf  []float32
+	layerOut         []float32
+	ffnA, ffnB       []float32
+	scoresBuf        []float32 // attention 单 token 的 score 行（长度随位置增长，M7.4）
+	outT             *tensor.Tensor // 词表投影输出（复用）
+	lastLogits       []float32      // 最近一次 logits 的拷贝
+	seq              []uint32       // 已处理的 token 序列（长度==pos）
 }
 
 // NewContext 创建推理上下文。nCtx=0 时取模型上下文长度。
@@ -67,6 +69,55 @@ func (ctx *Context) Reset() {
 	ctx.seq = ctx.seq[:0]
 }
 
+// Clear 清空会话状态（保留 KV 缓冲，清零即可；比 Reset 少一次大分配）。
+func (ctx *Context) Clear() {
+	ctx.kv.Clear()
+	ctx.pos = 0
+	ctx.seq = ctx.seq[:0]
+	ctx.lastLogits = nil
+}
+
+// Rewind 把会话回退到 pos：KV 有效长度截到 pos、位置复位、token 序列截短。
+// 配合前缀复用：KV 数据不抹零，pos 之后由后续 Forward 覆盖写。
+func (ctx *Context) Rewind(pos uint32) {
+	ctx.pos = pos
+	ctx.kv.Truncate(int(pos))
+	ctx.seq = ctx.seq[:pos]
+}
+
+// ForwardWithCache 带 KV 前缀缓存的前向（M7.5，对齐 llama.cpp cache_prompt 语义）。
+// 对「重发 / 加长前缀」的输入，只计算新增部分，历史公共前缀直接复用缓存。
+//
+// 策略：
+//   - 完全重发（ids == seq）：直接返回上轮最终 logits，零计算；
+//   - 前缀命中（lcp>0 且 ids 更长）：Rewind 到 lcp，只 Forward 新增段；
+//   - 失配 / 历史变短：Clear 后全量重算。
+func (ctx *Context) ForwardWithCache(ids []uint32) []float32 {
+	// 找 ids 与已处理 seq 的最长公共前缀
+	lcp := 0
+	max := len(ids)
+	if len(ctx.seq) < max {
+		max = len(ctx.seq)
+	}
+	for lcp < max && ids[lcp] == ctx.seq[lcp] {
+		lcp++
+	}
+
+	switch {
+	case lcp == len(ids) && lcp == len(ctx.seq):
+		// 完全重发：上一轮结果仍在，直接返回
+		return ctx.lastLogits
+	case lcp > 0 && lcp < len(ids):
+		// 前缀命中：回退到 lcp，只算新增
+		ctx.Rewind(uint32(lcp))
+		return ctx.Forward(ids[lcp:])
+	default:
+		// 失配或全新：清空全量重算
+		ctx.Clear()
+		return ctx.Forward(ids)
+	}
+}
+
 // KV 暴露 KV Cache（对比/调试用）。
 func (ctx *Context) KV() *cache.KVCache { return ctx.kv }
 
@@ -83,8 +134,9 @@ func (ctx *Context) Forward(ids []uint32) []float32 {
 	nVocab := m.VocabSize
 	kvEmb := uint32(m.HeadsKVCount() * m.HeadDim())
 
-	// ① embed：token id → 向量行 x[n, nEmb]
-	x := make([]float32, int(n)*int(nEmb))
+	// ① embed：token id → 向量行 x[n, nEmb]（x 跨 Forward 复用，M7.4）
+	ctx.xBuf = ensure(ctx.xBuf, int(n)*int(nEmb))
+	x := ctx.xBuf[:int(n)*int(nEmb)]
 	for i, id := range ids {
 		// token_embd 按 [emb, vocab] 存，取第 id 行 = 该 token 的词向量
 		if err := m.TokEmbeddings.DequantRow(uint32(id), x[int(i)*int(nEmb):(int(i)+1)*int(nEmb)]); err != nil {

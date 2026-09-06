@@ -244,14 +244,18 @@ func matmulQuantTransB(a, b, c *Tensor, threads int) {
 
 	// 并行或串行
 	if threads <= 1 || N <= 1 {
-		acc := make([]float32, M)
-		rowBuf := make([]float32, K)
+		acc := poolGet(int(M))
+		rowBuf := poolGet(int(K))
 		work(0, N, acc, rowBuf)
+		poolPut(acc)
+		poolPut(rowBuf)
 		return
 	}
 
 	var wg sync.WaitGroup
 	chunk := (N + uint32(threads) - 1) / uint32(threads)
+	bufs := allocWorkerBufs(threads, int(M), int(K))
+	defer freeWorkerBufs(bufs)
 	for w := 0; w < threads; w++ {
 		j0 := uint32(w) * chunk
 		j1 := j0 + chunk
@@ -262,12 +266,53 @@ func matmulQuantTransB(a, b, c *Tensor, threads int) {
 			break
 		}
 		wg.Add(1)
-		go func(j0, j1 uint32) {
+		go func(w int, j0, j1 uint32) {
 			defer wg.Done()
-			acc := make([]float32, M)
-			rowBuf := make([]float32, K)
-			work(j0, j1, acc, rowBuf)
-		}(j0, j1)
+			work(j0, j1, bufs[w].acc, bufs[w].rowBuf)
+		}(w, j0, j1)
 	}
 	wg.Wait()
+}
+
+// workerBuf 每 worker 私有的累加/行缓冲。
+type workerBuf struct {
+	acc    []float32
+	rowBuf []float32
+}
+
+// allocWorkerBufs 从 sync.Pool 取线程数个 worker 缓冲（M7.4：避免每次 matmul 都 make）。
+func allocWorkerBufs(n, m, k int) []workerBuf {
+	bufs := make([]workerBuf, n)
+	for w := 0; w < n; w++ {
+		bufs[w].acc = poolGet(m)
+		bufs[w].rowBuf = poolGet(k)
+	}
+	return bufs
+}
+
+// freeWorkerBufs 归还缓冲到池。
+func freeWorkerBufs(bufs []workerBuf) {
+	for _, b := range bufs {
+		poolPut(b.acc)
+		poolPut(b.rowBuf)
+	}
+}
+
+// float32Pool 复用可变长 float32 工作缓冲（各 matmul 内部临时用）。
+var float32Pool = sync.Pool{New: func() any { return make([]float32, 0) }}
+
+// poolGet 取长度 n 的缓冲：池里有足够容量的就复用，否则新建。
+func poolGet(n int) []float32 {
+	if s, ok := float32Pool.Get().([]float32); ok && cap(s) >= n {
+		return s[:n]
+	}
+	return make([]float32, n)
+}
+
+// poolPut 归还缓冲（长度清零，保留容量待下次扩容）。超大缓冲不入池。
+func poolPut(s []float32) {
+	if cap(s) > 1<<20 { // >1M 元素（4MB）不回收，避免霸占内存
+		return
+	}
+	float32Pool.Put(s[:0])
 }
