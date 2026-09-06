@@ -19,6 +19,7 @@ type GenerateOptions struct {
 	TopK        int
 	TopP        float64
 	Seed        int64
+	Threads     int     // 并行 worker 数（≤0 用默认 8）
 	Verbose     bool    // 打印模型信息与每步调试
 }
 
@@ -41,7 +42,7 @@ func Generate(modelPath, prompt string, opt GenerateOptions) (string, int, error
 		return "", 0, fmt.Errorf("初始化分词器失败: %w", err)
 	}
 
-	ctx := eval.NewContext(m, opt.NCtx)
+	ctx := eval.NewContext(m, opt.NCtx, opt.Threads)
 	sm := sampler.NewSampler(opt.Seed)
 
 	if opt.Verbose {
@@ -123,7 +124,7 @@ func NewChatSession(modelPath string, opt GenerateOptions) (*ChatSession, error)
 	return &ChatSession{
 		m:         m,
 		tok:       tok,
-		ctx:     eval.NewContext(m, opt.NCtx),
+		ctx:     eval.NewContext(m, opt.NCtx, opt.Threads),
 		sm:        sampler.NewSampler(opt.Seed),
 		template:  tok.ChatTemplate,
 		samplerCfg: sampler.Config{

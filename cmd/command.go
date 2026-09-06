@@ -46,6 +46,7 @@ func run(args []string) error {
 	var topK = fs.Int("top-k", 0, "Top-K 截断（≤0 关闭）")
 	var topP = fs.Float64("top-p", 0.9, "Top-P 核采样阈值（1 关闭）")
 	var seed = fs.Int64("seed", 42, "随机种子")
+	var threads = fs.Int("threads", 0, "并行 worker 数（0=默认 8，12 核留余量）")
 	var verbose = fs.Bool("verbose", false, "打印模型信息与每步调试")
 	var chatMode = fs.Bool("chat", false, "交互式聊天模式（多轮对话，需模型带对话模板）")
 	fs.Usage = func() {
@@ -77,6 +78,7 @@ func run(args []string) error {
 			TopK:        *topK,
 			TopP:        *topP,
 			Seed:        *seed,
+			Threads:     *threads,
 			Verbose:     *verbose,
 		})
 	}
@@ -94,6 +96,7 @@ func run(args []string) error {
 		TopK:        *topK,
 		TopP:        *topP,
 		Seed:        *seed,
+		Threads:     *threads,
 		Verbose:     *verbose,
 	})
 	if err != nil {

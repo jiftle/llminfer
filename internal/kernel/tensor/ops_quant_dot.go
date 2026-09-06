@@ -1,6 +1,6 @@
 // 融合反量化点积：量化权重矩阵乘的快速路径。
 //
-// 里程碑：M7.2。
+// 里程碑：M7.2 / M7.3。
 //
 // 思路（对齐 goLLM）：MatMulTransB 在量化权重上做 C = A × B^T，
 // 传统做法先 DequantRow 把 B 整行反量化进 rowBuf 再读回乘累加（两次内存往返），
@@ -8,9 +8,10 @@
 //
 //	dot = Σ_k a[k]*q[k]      （先对整数累加，每块只乘一次 scale）
 //
-// 数值等价性：块共享一个 scale d，先做 Σ a*q 再乘 d，与逐元素 a*q*d
-// 在浮点累加顺序不同，相对误差 < 1e-4，满足工程容差。
+// M7.3 起支持多线程：按输出列 j 分片，每 worker 私有 acc/rowBuf。
 package tensor
+
+import "sync"
 
 // dotQuantCol 计算 B 的第 j 列与 aF（M×K）逐行点积，写入 c[i*N+j]。
 // 仅对 Nelements≥1 且 M≥1 生效；acc 为调用方复用的 M 长累加缓冲，避免每列分配。
@@ -202,42 +203,71 @@ func dotQuantFallback(aF []float32, m, k uint32, b *Tensor, j uint32, cF []float
 }
 
 // matmulQuantTransB 量化权重专用矩阵乘：C = A × B^T。
-// A:[M,K] F32，B:[K,N] 量化，C:[M,N]。
+// A:[M,K] F32，B:[K,N] 量化，C:[M,N]。threads 为并行 worker 数（M7.3）。
 //
 // 两条路径权衡（M 是批量行数）：
 //   - M=1（decode 单 token）：每次点积只有一行 a，融合版直接在量化块上累加整数、
-//     每块只乘一次 scale，省掉 rowBuf 内存往返。外层按 i 行一行一列，缓存友好。
-//   - M>1（prefill 批量）：若仍每行重读量化权重，B 的量化数据要被读 M 遍；
-//     不如每列 DequantRow 一次进 rowBuf，M 行复用，只读一遍。
-func matmulQuantTransB(a, b, c *Tensor) {
+//     每块只乘一次 scale，省掉 rowBuf 内存往返。按列 j 分片并行。
+//   - M>1（prefill 批量）：每列 DequantRow 一次进 rowBuf，M 行复用（只读一遍量化权重）。
+//     按列 j 分片并行，每 worker 私有 rowBuf 零竞争。
+func matmulQuantTransB(a, b, c *Tensor, threads int) {
 	M, K, N := a.NE[1], a.NE[0], b.NE[1]
 	ensureN(c, int(M*N))
 	aF := a.AsFloat32()
 	cF := c.Floats
 
-	switch {
-	case M == 1:
-		// decode 路径：融合点积（每行每列一次单行 dot）
-		acc := make([]float32, 1)
-		rowBuf := make([]float32, K)
-		for j := uint32(0); j < N; j++ {
-			dotQuantCol(aF, 1, K, b, j, cF, N, acc, rowBuf)
-		}
-	case M > 1:
-		// prefill 路径：每列反量化一次进 rowBuf，M 行复用
-		rowBuf := make([]float32, K)
-		for j := uint32(0); j < N; j++ {
-			if err := b.DequantRow(j, rowBuf); err != nil {
-				panic(err)
+	// 每个 worker 处理一段输出列 [j0, j1)，私有缓冲。
+	work := func(j0, j1 uint32, acc, rowBuf []float32) {
+		switch {
+		case M == 1:
+			// decode：融合点积，每列单行 dot
+			for j := j0; j < j1; j++ {
+				dotQuantCol(aF, 1, K, b, j, cF, N, acc, rowBuf)
 			}
-			for i := uint32(0); i < M; i++ {
-				acc := float32(0)
-				base := int(i) * int(K)
-				for k := uint32(0); k < K; k++ {
-					acc += aF[base+int(k)] * rowBuf[k]
+		default:
+			// prefill：每列反量化一次进 rowBuf，M 行复用
+			for j := j0; j < j1; j++ {
+				if err := b.DequantRow(j, rowBuf); err != nil {
+					panic(err)
 				}
-				cF[int(i)*int(N)+int(j)] = acc
+				for i := uint32(0); i < M; i++ {
+					s := float32(0)
+					base := int(i) * int(K)
+					for k := uint32(0); k < K; k++ {
+						s += aF[base+int(k)] * rowBuf[k]
+					}
+					cF[int(i)*int(N)+int(j)] = s
+				}
 			}
 		}
 	}
+
+	// 并行或串行
+	if threads <= 1 || N <= 1 {
+		acc := make([]float32, M)
+		rowBuf := make([]float32, K)
+		work(0, N, acc, rowBuf)
+		return
+	}
+
+	var wg sync.WaitGroup
+	chunk := (N + uint32(threads) - 1) / uint32(threads)
+	for w := 0; w < threads; w++ {
+		j0 := uint32(w) * chunk
+		j1 := j0 + chunk
+		if j1 > N {
+			j1 = N
+		}
+		if j0 >= N {
+			break
+		}
+		wg.Add(1)
+		go func(j0, j1 uint32) {
+			defer wg.Done()
+			acc := make([]float32, M)
+			rowBuf := make([]float32, K)
+			work(j0, j1, acc, rowBuf)
+		}(j0, j1)
+	}
+	wg.Wait()
 }

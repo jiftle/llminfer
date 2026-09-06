@@ -24,6 +24,8 @@ type Context struct {
 
 	pos uint32 // 当前已处理 token 数（下一个待写位置）
 
+	threads int // 并行 worker 数（M7.3，0=用默认）
+
 	// 复用缓冲（跨 Forward 调用惰性扩容，decode 每步不重复分配）
 	qBuf, kBuf, vBuf  []float32
 	attBuf, normBuf   []float32
@@ -35,7 +37,8 @@ type Context struct {
 }
 
 // NewContext 创建推理上下文。nCtx=0 时取模型上下文长度。
-func NewContext(m *model.LLaMAModel, nCtx int) *Context {
+// threads 可选：并行 worker 数（0/缺省用默认 8）。
+func NewContext(m *model.LLaMAModel, nCtx int, threads ...int) *Context {
 	if nCtx == 0 {
 		nCtx = m.CtxSize
 	}
@@ -46,7 +49,11 @@ func NewContext(m *model.LLaMAModel, nCtx int) *Context {
 		neox = true
 	}
 	kv := cache.New(m.LayersCount, m.HeadsKVCount()*m.HeadDim(), nCtx)
-	return &Context{m: m, nCtx: nCtx, kv: kv, ropeNeox: neox}
+	thr := 0
+	if len(threads) > 0 {
+		thr = threads[0]
+	}
+	return &Context{m: m, nCtx: nCtx, kv: kv, ropeNeox: neox, threads: thr}
 }
 
 // Pos 当前已处理 token 数。
@@ -107,7 +114,7 @@ func (ctx *Context) Forward(ids []uint32) []float32 {
 		ctx.outT = tensor.NewTensor(tensor.TYPE_F32, uint32(nVocab), n) // [vocab, n] 兼容 MatMul 输出行序
 	}
 	// 权重 m.Output 布局 [emb, vocab]，激活 [n, emb] → 输出 [n, vocab]
-	tensor.MatMulTransB(actView(ctx.normBuf, n, uint32(nEmb)), m.Output, ctx.outT)
+	tensor.MatMulTransB(actView(ctx.normBuf, n, uint32(nEmb)), m.Output, ctx.outT, ctx.threads)
 	logits := ctx.outT.Floats[(int(n)-1)*nVocab : int(n)*nVocab]
 
 	ctx.pos += n
@@ -128,9 +135,9 @@ func (ctx *Context) forwardLayer(li int, x []float32, n uint32, nEmb, kvEmb, pos
 	copy(ctx.normBuf, x)
 	tensor.RMSNorm(ctx.normBuf, L.AttentionNorm.AsFloat32(), m.RMSNormEpsilon)
 	// 2) QKV 投影（三个线性映射）
-	tensor.MatMulTransB(actView(ctx.normBuf, n, nEmb), L.WQ, actView(ctx.qBuf, n, nEmb))
-	tensor.MatMulTransB(actView(ctx.normBuf, n, nEmb), L.WK, actView(ctx.kBuf, n, kvEmb))
-	tensor.MatMulTransB(actView(ctx.normBuf, n, nEmb), L.WV, actView(ctx.vBuf, n, kvEmb))
+	tensor.MatMulTransB(actView(ctx.normBuf, n, nEmb), L.WQ, actView(ctx.qBuf, n, nEmb), ctx.threads)
+	tensor.MatMulTransB(actView(ctx.normBuf, n, nEmb), L.WK, actView(ctx.kBuf, n, kvEmb), ctx.threads)
+	tensor.MatMulTransB(actView(ctx.normBuf, n, nEmb), L.WV, actView(ctx.vBuf, n, kvEmb), ctx.threads)
 	// 3) bias（qwen2 有）
 	if L.WQb != nil {
 		addBias(ctx.qBuf, L.WQb.AsFloat32())
@@ -148,20 +155,20 @@ func (ctx *Context) forwardLayer(li int, x []float32, n uint32, nEmb, kvEmb, pos
 	ctx.writeKV(li, n, pos0, kvEmb)
 	// 6) 注意力 → attBuf，再 WO 投影 + 残差
 	ctx.attention(li, n, nEmb, kvEmb, pos0)
-	tensor.MatMulTransB(actView(ctx.attBuf, n, nEmb), L.WO, actView(ctx.layerOut, n, nEmb))
+	tensor.MatMulTransB(actView(ctx.attBuf, n, nEmb), L.WO, actView(ctx.layerOut, n, nEmb), ctx.threads)
 	addResidual(x, ctx.layerOut)
 
 	// —— 前馈子块（SwiGLU）——
 	copy(ctx.normBuf, x)
 	tensor.RMSNorm(ctx.normBuf, L.FFNNorm.AsFloat32(), m.RMSNormEpsilon)
-	tensor.MatMulTransB(actView(ctx.normBuf, n, nEmb), L.W1, actView(ctx.ffnA, n, uint32(m.FFSize)))
-	tensor.MatMulTransB(actView(ctx.normBuf, n, nEmb), L.W3, actView(ctx.ffnB, n, uint32(m.FFSize)))
+	tensor.MatMulTransB(actView(ctx.normBuf, n, nEmb), L.W1, actView(ctx.ffnA, n, uint32(m.FFSize)), ctx.threads)
+	tensor.MatMulTransB(actView(ctx.normBuf, n, nEmb), L.W3, actView(ctx.ffnB, n, uint32(m.FFSize)), ctx.threads)
 	// SwiGLU：silu(ffnA) ⊙ ffnB，其中 ffnA=W1·x（gate）、ffnB=W3·x（up）
 	tensor.SiLU(ctx.ffnA)
 	for i := range ctx.ffnA {
 		ctx.ffnA[i] *= ctx.ffnB[i]
 	}
-	tensor.MatMulTransB(actView(ctx.ffnA, n, uint32(m.FFSize)), L.W2, actView(ctx.layerOut, n, nEmb))
+	tensor.MatMulTransB(actView(ctx.ffnA, n, uint32(m.FFSize)), L.W2, actView(ctx.layerOut, n, nEmb), ctx.threads)
 	addResidual(x, ctx.layerOut)
 }
 

@@ -4,12 +4,14 @@ package cmd
 import (
 	"flag"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/feiyuclaw/llminfer/internal/kernel/eval"
 	"github.com/feiyuclaw/llminfer/internal/kernel/gguf"
 	"github.com/feiyuclaw/llminfer/internal/kernel/model"
 	"github.com/feiyuclaw/llminfer/internal/kernel/sampler"
+	"github.com/feiyuclaw/llminfer/internal/kernel/tensor"
 	"github.com/feiyuclaw/llminfer/internal/kernel/tokenizer"
 )
 
@@ -21,6 +23,7 @@ func bench(args []string) error {
 	var nTok = fs.Int("n-tokens", 32, "decode 阶段生成多少个 token")
 	var ppLen = fs.Int("prompt-tokens", 128, "prefill 阶段用多少个 token 当 prompt")
 	var seed = fs.Int64("seed", 42, "随机种子")
+	var threads = fs.Int("threads", 0, "并行 worker 数（0=默认）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -57,9 +60,14 @@ func bench(args []string) error {
 	}
 	fmt.Printf("模型: %s（%d 层, emb=%d）\n", m.Arch, m.LayersCount, m.EmbeddingSize)
 	fmt.Printf("加载耗时: %d ms\n", loadDur.Milliseconds())
+	effThreads := *threads
+	if effThreads <= 0 {
+		effThreads = tensor.DefaultThreads
+	}
+	fmt.Printf("线程: %d（本机 %d 核）\n", effThreads, runtime.NumCPU())
 
 	// prefill：一次前向吞掉整个 prompt（warmup 一次避免首跑含分配开销）
-	ctx := eval.NewContext(m, 0)
+	ctx := eval.NewContext(m, 0, *threads)
 	ctx.Forward(promptIDs)
 	t0 = time.Now()
 	ctx.Reset()
@@ -88,6 +96,6 @@ func bench(args []string) error {
 
 	fmt.Printf("prefill: %d tokens in %.1f ms  → %.1f tokens/s\n", len(promptIDs), ppDur.Seconds()*1000, ppSpeed)
 	fmt.Printf("decode:  %d tokens in %.1f ms  → %.1f tokens/s\n", nGen, tgDur.Seconds()*1000, tgSpeed)
-	fmt.Printf("（本机 CPU 单线程，无 SIMD 加速）\n")
+	fmt.Printf("（本机 %d 核 CPU，无 SIMD 加速，%d 线程）\n", runtime.NumCPU(), effThreads)
 	return nil
 }
