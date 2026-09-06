@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "run 推理",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}",
+      "args": [
+        "run",
+        "models/qwen2.5-0.5b.gguf",
+        "你好，介绍一下你自己"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "dlvLoadConfig": {
+        "followPointers": true,
+        "maxVariableRecurse": 3,
+        "maxStringLength": 2000,
+        "maxArrayValues": 256
+      },
+      "preLaunchTask": "build"
+    },
+    {
+      "name": "run --help",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}",
+      "args": ["run", "--help"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "测试（当前包）",
+      "type": "go",
+      "request": "launch",
+      "mode": "test",
+      "program": "${fileDirname}"
+    }
+  ]
+}
